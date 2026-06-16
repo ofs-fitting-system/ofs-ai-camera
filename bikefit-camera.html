@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>BikeFit Cam · 側拍即時分析</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --bg:#0a0c0f; --panel:#13171c; --line:#222a32; --ink:#eef2f5; --muted:#7d8a96; --accent:#c8ff3d; --accent-ink:#0a0c0f; --danger:#ff5c5c; --blue:#2f9eff; --radius:16px; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:"Archivo",system-ui,sans-serif;overscroll-behavior:none}
+  body{overflow:hidden}
+  .mono{font-family:"JetBrains Mono",monospace}
+  .screen{position:fixed;inset:0;display:none;flex-direction:column} .screen.active{display:flex}
+
+  #home{align-items:center;justify-content:center;padding:28px;text-align:center;background:radial-gradient(900px 500px at 50% -10%, rgba(200,255,61,.10), transparent 60%),var(--bg)}
+  #home .logo{font-weight:900;font-size:13px;letter-spacing:.32em;color:var(--accent);margin-bottom:18px}
+  #home h1{font-weight:900;font-size:clamp(30px,8vw,52px);line-height:1.02;margin:0 0 14px}
+  #home p{color:var(--muted);max-width:400px;margin:0 0 34px;line-height:1.6;font-size:15px}
+  .choose{display:flex;flex-direction:column;gap:14px;width:100%;max-width:380px}
+  .role{display:flex;align-items:center;gap:16px;text-align:left;padding:20px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);color:var(--ink);cursor:pointer;transition:.18s}
+  .role:active{transform:scale(.985)} .role:hover{border-color:var(--accent)}
+  .role .ic{flex:0 0 52px;height:52px;border-radius:13px;display:grid;place-items:center;background:rgba(200,255,61,.10);color:var(--accent);font-size:26px}
+  .role.blue .ic{background:rgba(47,158,255,.12);color:var(--blue)}
+  .role .t{font-weight:700;font-size:18px} .role .s{color:var(--muted);font-size:13px;margin-top:2px}
+  .btn{border:none;border-radius:12px;font-family:inherit;font-weight:700;font-size:15px;padding:13px 18px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+  .btn.primary{background:var(--accent);color:var(--accent-ink)} .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)} .btn:active{transform:scale(.97)}
+
+  /* 共用：影像舞台 */
+  .stage{position:absolute;inset:0;overflow:hidden;background:#000}
+  #camVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1}
+  .upbar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(10,12,15,.85);border:1px solid var(--line);border-radius:12px;margin-bottom:8px}
+  .upbar.hidden{display:none}
+  .upbar input[type=range]{flex:1;accent-color:#2f9eff;height:4px}
+  .up-btn{font-family:inherit;font-weight:700;font-size:13px;background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:6px 10px;white-space:nowrap;cursor:pointer}
+  #fitCanvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:10;touch-action:none;pointer-events:none}
+  #dispVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+
+  .topbar{position:absolute;top:0;left:0;right:0;z-index:30;padding:12px 14px;padding-top:max(12px,env(safe-area-inset-top));
+    display:flex;align-items:center;gap:8px;background:linear-gradient(rgba(0,0,0,.65),transparent);font-size:13px;font-weight:700}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted)} .dot.live{background:var(--blue)}
+  .codepill{margin-left:auto;background:rgba(47,158,255,.16);border:1px solid var(--blue);color:#fff;border-radius:9px;padding:5px 12px;font-family:"JetBrains Mono",monospace;font-weight:700;letter-spacing:.1em}
+  .iconbtn{background:rgba(19,23,28,.7);border:1px solid var(--line);color:var(--ink);border-radius:10px;width:38px;height:38px;font-size:17px;cursor:pointer}
+  .freeze-tag{position:absolute;top:60px;right:14px;z-index:31;background:var(--blue);color:#fff;font-weight:700;font-size:11px;letter-spacing:.1em;padding:5px 10px;border-radius:8px;display:none}
+
+  .readout{position:absolute;top:48px;left:12px;z-index:31;background:rgba(10,12,15,.7);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:14px;padding:8px 11px;max-width:64vw;pointer-events:none}
+  #roList{display:grid;grid-template-columns:1fr 1fr;gap:1px 16px}
+  .readout.hidden{display:none}
+  .ro-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px} #roSide{font-weight:900;font-size:13px;color:var(--blue)}
+  .ro-btns button{font-family:inherit;font-weight:700;font-size:11px;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:8px;padding:4px 8px;margin-left:4px;cursor:pointer;pointer-events:auto}
+  .ro-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:2px 0;font-size:12px}
+  .ro-row .nm b{color:var(--ink);font-weight:700}
+  .ro-row .val{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:15px;color:var(--blue)} .ro-row .ext{font-family:"JetBrains Mono",monospace;font-size:9px;color:var(--muted);margin-left:3px}
+
+  .adjust-hint{position:absolute;top:48px;left:12px;z-index:32;background:rgba(47,158,255,.92);color:#fff;font-weight:700;font-size:12px;padding:7px 12px;border-radius:11px;display:none;align-items:center;gap:8px;max-width:78vw}
+  .adjust-hint button{font-family:inherit;font-weight:800;font-size:12px;background:#fff;color:var(--blue);border:none;border-radius:8px;padding:5px 10px;cursor:pointer}
+
+  .bottombar{position:absolute;left:0;right:0;bottom:0;z-index:30;display:flex;flex-direction:column;gap:8px;padding:10px;padding-bottom:max(10px,env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.82))}
+  .capbar,.toolbar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;align-items:center}
+  .capbtn{font-family:inherit;font-weight:800;font-size:13px;padding:10px 14px;border-radius:11px;border:1px solid var(--line);background:rgba(19,23,28,.7);backdrop-filter:blur(6px);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .capbtn.on{border-color:var(--blue);background:var(--blue);color:#fff} .capbtn.act{border-color:rgba(47,158,255,.5)}
+  .cap-sep{width:1px;height:22px;background:var(--line)} .recdot{width:9px;height:9px;border-radius:50%;background:var(--danger);display:none}
+  .tool{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:54px;padding:8px 6px;border:1px solid var(--line);border-radius:12px;background:rgba(19,23,28,.7);backdrop-filter:blur(6px);color:var(--ink);font-size:11px;font-weight:700;cursor:pointer}
+  .tool .ic{font-size:17px} .tool.on{border-color:var(--blue);background:rgba(47,158,255,.16);color:var(--blue)}
+
+  .join{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:28px;text-align:center;background:var(--bg);z-index:40}
+  .join h2{margin:0;font-weight:900;font-size:24px} .join p{color:var(--muted);margin:0;font-size:14px;max-width:300px;line-height:1.6}
+  .code-input{font-family:"JetBrains Mono",monospace;font-size:40px;font-weight:700;letter-spacing:.3em;text-align:center;width:230px;padding:14px;border-radius:14px;border:1px solid var(--line);background:var(--panel);color:var(--blue);outline:none}
+  .code-input:focus{border-color:var(--blue)} .join-msg{font-size:13px;min-height:18px;color:var(--muted)} .join-msg.err{color:var(--danger)}
+
+  .compare{position:absolute;inset:0;z-index:60;background:rgba(8,10,13,.97);display:flex;flex-direction:column;padding:14px;padding-top:max(14px,env(safe-area-inset-top))}
+  .compare.hidden{display:none}
+  .cmp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px} .cmp-head b{font-size:16px}
+  .cmp-tab{font-family:inherit;font-weight:700;font-size:13px;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:9px;padding:7px 12px;margin-left:6px;cursor:pointer} .cmp-tab.on{border-color:var(--blue);background:var(--blue);color:#fff}
+  .cmp-close{margin-left:10px;background:transparent;border:none;color:var(--ink);font-size:20px;cursor:pointer}
+  .cmp-body{flex:1;display:flex;gap:12px;min-height:0;overflow:hidden} .cmp-col{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0}
+  .cmp-lbl{align-self:flex-start;background:var(--blue);color:#fff;font-weight:800;font-size:12px;letter-spacing:.1em;padding:4px 10px;border-radius:8px}
+  .cmp-slot{flex:1;border:1px solid var(--line);border-radius:14px;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+  .cmp-slot img,.cmp-slot video{max-width:100%;max-height:100%;object-fit:contain} .cmp-empty{color:var(--muted);font-size:13px}
+  .cmp-dl{position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;text-decoration:none;font-size:12px;font-weight:700;padding:5px 10px;border-radius:8px;border:1px solid var(--line)}
+  .cmp-foot{margin-top:12px;display:flex;justify-content:center} @media (max-aspect-ratio:1/1){ .cmp-body{flex-direction:column} }
+  .cmp-diff{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:12px}
+  .diff-chip{display:flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 10px}
+  .dc-name{font-weight:800;font-size:13px;color:var(--ink)}
+  .dc-vals{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--muted)} .dc-vals i{font-style:normal;margin:0 3px}
+  .dc-delta{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:13px}
+  .dc-delta.up{color:#5fe0a0} .dc-delta.down{color:#ffb454} .dc-delta.zero{color:var(--muted)}
+
+  .toast{position:absolute;bottom:150px;left:50%;transform:translateX(-50%);z-index:50;background:rgba(0,0,0,.85);color:#fff;font-weight:700;font-size:13px;padding:10px 16px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none} .toast.show{opacity:1}
+  .shutter{position:absolute;inset:0;background:#fff;z-index:55;opacity:0;pointer-events:none} .shutter.flash{animation:sh .25s} @keyframes sh{0%{opacity:.85}100%{opacity:0}}
+  .hidden{display:none!important}
+  /* 報告頁 */
+  .report{position:absolute;inset:0;z-index:62;background:#0a0c0f;display:flex;flex-direction:column;padding:14px;padding-top:max(14px,env(safe-area-inset-top))}
+  .report.hidden{display:none}
+  .rep-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .rep-head b{font-size:17px}
+  .rep-tier{display:inline-flex;gap:4px} .rep-tier button{font-family:inherit;font-weight:700;font-size:11px;border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:8px;padding:5px 9px;cursor:pointer} .rep-tier button.on{border-color:var(--blue);background:var(--blue);color:#fff}
+  .rep-close{background:transparent;border:none;color:var(--ink);font-size:20px;cursor:pointer;margin-left:8px}
+  .rep-body{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:11px}
+  .rep-row{border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:var(--panel)}
+  .rep-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+  .rep-name{font-weight:800;font-size:15px} .rep-val{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:20px}
+  .rep-val.ok{color:#5fe0a0} .rep-val.over{color:#ffb454} .rep-val.under{color:#ff8a8a} .rep-val.na{color:var(--muted)}
+  .rep-bar{position:relative;height:10px;border-radius:6px;background:#222a32;margin:8px 0 4px}
+  .rep-zone{position:absolute;top:0;bottom:0;background:rgba(95,224,160,.45);border-radius:6px}
+  .rep-mark{position:absolute;top:-3px;width:4px;height:16px;border-radius:2px;background:#fff;transform:translateX(-2px)}
+  .rep-range{font-size:11px;color:var(--muted)}
+  .rep-advice{font-size:13px;color:#cfd6dc;margin-top:7px;line-height:1.5}
+  .rep-advice.locked{filter:blur(4.5px);user-select:none}
+  .rep-lock{margin-top:6px;font-size:12px;font-weight:700;color:var(--blue)}
+  .rep-sec{font-weight:800;font-size:12px;color:var(--muted);letter-spacing:.5px;margin:6px 2px -2px}
+  .rep-acc{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:0 13px}
+  .rep-acc summary{cursor:pointer;padding:12px 0;font-weight:700;font-size:14px;list-style:none;display:flex;justify-content:space-between;align-items:center}
+  .rep-acc summary::-webkit-details-marker{display:none} .rep-acc summary::after{content:'＋';color:var(--blue);font-weight:800} .rep-acc[open] summary::after{content:'－'}
+  .rep-acc p{margin:0 0 13px;font-size:13px;color:#cfd6dc;line-height:1.65}
+  .rep-foot{margin-top:12px;display:flex;justify-content:center}
+</style>
+</head>
+<body>
+
+<section id="home" class="screen active">
+  <div class="logo">● BIKEFIT CAM</div>
+  <h1>側拍即時<br>分析系統</h1>
+  <p>Fitter 拿手機側拍、操作與解說；平板放在車主前方當顯示螢幕。手機端負責 AI 偵測與錄製，畫面即時投到平板。</p>
+  <div class="choose">
+    <button class="role" onclick="goFitter()"><div class="ic">📷</div><div><div class="t">我是 Fitter（手機）</div><div class="s">側拍、看角度、操作與錄製</div></div></button>
+    <button class="role blue" onclick="goDisplay()"><div class="ic">🖥️</div><div><div class="t">車主螢幕（平板）</div><div class="s">放前方，純顯示分析畫面</div></div></button>
+  </div>
+</section>
+
+<!-- ============ Fitter（手機） ============ -->
+<section id="fitter" class="screen">
+  <div class="stage" id="stage">
+    <video id="camVideo" autoplay muted playsinline webkit-playsinline></video>
+    <input type="file" id="vidFile" accept="video/*" style="display:none" onchange="onVidFile(event)">
+    <canvas id="fitCanvas"></canvas>
+
+    <div class="topbar"><span class="dot" id="fitDot"></span><span id="fitStatusText">啟動中…</span><span class="codepill" id="fitCode">····</span></div>
+    <div class="freeze-tag" id="freezeTag">⏸ 定格中</div>
+
+    <div class="readout hidden" id="readout">
+      <div class="ro-head"><span id="roSide">自動</span><span class="ro-btns"><button onclick="cycleSide()">換邊</button><button onclick="resetStats()">歸零</button></span></div>
+      <div id="roList"></div>
+    </div>
+
+    <div class="adjust-hint" id="adjustHint">已定格 · 拖曳藍點校正關節 <button onclick="resetOverrides()">重設</button></div>
+
+    <div class="bottombar">
+      <div class="upbar hidden" id="upbar">
+        <button class="up-btn" id="upPlay" onclick="uploadPlayPause()">⏸</button>
+        <input type="range" id="upSeek" min="0" max="1000" value="0" oninput="uploadSeek(this.value)">
+        <button class="up-btn" onclick="switchToCamera()">📷 切回相機</button>
+      </div>
+      <div class="capbar">
+        <button class="capbtn" id="preBtn" onclick="setMode('pre')">PRE</button>
+        <button class="capbtn" id="postBtn" onclick="setMode('post')">POST</button>
+        <span class="cap-sep"></span>
+        <button class="capbtn act" onclick="capturePhoto()">📷 拍照</button>
+        <button class="capbtn act" id="recBtn" onclick="toggleRecord()"><span class="recdot" id="recDot"></span><span class="lbl">錄影</span></button>
+        <button class="capbtn" onclick="openCompare()">⇄ 對照</button>
+        <button class="capbtn" onclick="openReport()">📋 報告</button>
+        <span class="cap-sep"></span>
+        <button class="capbtn" id="ofsRecBtn" style="border-color:#1d9e75;color:#1d9e75" onclick="toggleOfsRecord()"><span class="recdot" id="ofsDot" style="background:#1d9e75"></span><span class="lbl">上傳 OFS</span></button>
+      </div>
+      <div class="toolbar">
+        <div class="tool" id="tAuto" onclick="toggleAuto()"><span class="ic">👤</span>AI追蹤</div>
+        <div class="tool" id="tAdjust" onclick="toggleAdjust()"><span class="ic">✋</span>校正</div>
+        <div class="tool" id="tFreeze" onclick="toggleFreeze()"><span class="ic">⏸</span>定格</div>
+        <div class="tool" id="tGrid" onclick="toggleGrid()"><span class="ic">▦</span>格線</div>
+        <div class="tool" id="tMirror" onclick="toggleMirror()"><span class="ic">⇋</span>鏡像</div>
+        <div class="tool" onclick="flipCamera()"><span class="ic">🔄</span>鏡頭</div>
+        <div class="tool" id="tUpload" onclick="pickVideo()"><span class="ic">📁</span>影片分析</div>
+      </div>
+    </div>
+
+    <div class="shutter" id="shutter"></div>
+    <div class="toast" id="toast"></div>
+
+    <div class="compare hidden" id="compare">
+      <div class="cmp-head"><b>PRE vs POST 對照</b><div>
+        <button id="cmpPhotoTab" class="cmp-tab on" onclick="cmpTab('photo')">照片</button>
+        <button id="cmpVideoTab" class="cmp-tab" onclick="cmpTab('video')">影片</button>
+        <button class="cmp-close" onclick="closeCompare()">✕</button></div></div>
+      <div class="cmp-diff" id="cmpDiff"></div>
+      <div class="cmp-body">
+        <div class="cmp-col"><span class="cmp-lbl">PRE-FIT</span><div class="cmp-slot" id="cmpPre"></div></div>
+        <div class="cmp-col"><span class="cmp-lbl">POST-FIT</span><div class="cmp-slot" id="cmpPost"></div></div>
+      </div>
+      <div class="cmp-foot"><button class="btn ghost" id="cmpSync" onclick="syncPlay()" style="display:none">▶ 同步播放</button>
+        <button class="btn" style="background:#ff7a1a;color:#fff" onclick="sendToOFS()">📤 角度/照片快速帶入 OFS</button></div>
+    </div>
+
+    <div class="report hidden" id="report">
+      <div class="rep-head"><b>Fitting 報告</b>
+        <div style="display:flex;align-items:center">
+          <div class="rep-tier" id="repTier">
+            <button data-t="trial" onclick="setTier('trial')">試用</button>
+            <button data-t="paid" onclick="setTier('paid')">付費</button>
+            <button data-t="full" class="on" onclick="setTier('full')">完整</button>
+          </div>
+          <button class="rep-close" onclick="closeReport()">✕</button>
+        </div>
+      </div>
+      <div class="rep-body" id="repBody"></div>
+      <div class="rep-foot"><button class="btn" id="repDl" style="background:var(--blue);color:#fff" onclick="downloadReport()">⬇ 下載報告</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 車主螢幕（平板） ============ -->
+<section id="display" class="screen">
+  <div class="stage">
+    <video id="dispVideo" autoplay muted playsinline webkit-playsinline></video>
+    <div class="topbar"><span class="dot" id="dispDot"></span><span id="dispStatus">等待連線</span>
+      <button class="iconbtn" style="margin-left:auto" onclick="dispFull()">⛶</button></div>
+    <div class="join" id="dispJoin">
+      <h2>輸入手機代碼</h2><p>看 Fitter 手機上方的 4 位數代碼，輸入後即可顯示分析畫面。</p>
+      <input class="code-input mono" id="dispCode" inputmode="numeric" maxlength="4" placeholder="0000">
+      <button class="btn primary" id="dispBtn" onclick="dispConnect()" style="background:var(--blue);color:#fff">連線</button>
+      <div class="join-msg" id="dispMsg"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+const $=id=>document.getElementById(id);
+const show=id=>{document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));$(id).classList.add('active');};
+let peer=null, localStream=null, currentFacing='environment', srcMode='camera';
+
+/* ===== 共用：姿態定義 ===== */
+const BLUE='#2f9eff';
+const SIDES={ left:{shoulder:11,elbow:13,wrist:15,hip:23,knee:25,ankle:27,heel:29,toe:31}, right:{shoulder:12,elbow:14,wrist:16,hip:24,knee:26,ankle:28,heel:30,toe:32} };
+const JN={shoulder:'肩',elbow:'肘',wrist:'腕',hip:'髖',knee:'膝',ankle:'踝',heel:'腳跟',toe:'腳掌'};
+const ANGLE_DEFS={ back:{label:'Back',tri:'肘-肩-髖',pts:['elbow','shoulder','hip'],vtx:'shoulder'},
+  arm:{label:'Arm',tri:'肩-肘-腕',pts:['shoulder','elbow','wrist'],vtx:'elbow'},
+  hip:{label:'Hip',tri:'肩-髖-膝',pts:['shoulder','hip','knee'],vtx:'hip'},
+  knee:{label:'Knee',tri:'髖-膝-踝',pts:['hip','knee','ankle'],vtx:'knee'},
+  ankle:{label:'Ankle',tri:'膝-踝-腳跟',pts:['knee','ankle','heel'],vtx:'ankle'},
+  foot:{label:'Foot',tri:'踝-腳跟-腳掌',pts:['ankle','heel','toe'],vtx:'heel'} };
+const ORDER=['back','arm','hip','knee','ankle','foot'];
+const ZH={back:'背',arm:'臂',hip:'髖',knee:'膝',ankle:'踝',foot:'足'};
+const BONES=[['shoulder','elbow'],['elbow','wrist'],['shoulder','hip'],['hip','knee'],['knee','ankle'],['ankle','heel'],['heel','toe']];
+
+/* ===== Fitter（手機） ===== */
+let camVideo,fitCanvas,fitCtx,outStream=null,poseLandmarker=null;
+let aiOn=false, mirrored=false, gridOn=false, frozen=false, freezeImg=null, adjustMode=false;
+let lastLM=null, curSide='right', sideMode='auto', overrides={}, stats={}, captureMode=null, lastAngles=null;
+let compareOpen=false, cmpImg={pre:null,post:null};
+let ofsRec=null, ofsChunks=[], ofsAnnRec=null, ofsAnnChunks=[], ofsRecording=false;
+
+async function goFitter(){ show('fitter'); camVideo=$('camVideo'); fitCanvas=$('fitCanvas'); fitCtx=fitCanvas.getContext('2d');
+  const code=String(Math.floor(1000+Math.random()*9000)); await startCam(); registerPeer(code); renderLoop();
+  bindAdjust(); ensurePose().then(ok=>{ if(ok){ aiOn=true; $('tAuto').classList.add('on'); $('readout').classList.remove('hidden'); } }); }
+async function startCam(){ if(localStream)localStream.getTracks().forEach(t=>t.stop());
+  try{ localStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:currentFacing},width:{ideal:1280},height:{ideal:720}},audio:false});
+    camVideo.srcObject=localStream; await camVideo.play().catch(()=>{}); setFit('相機已啟動'); }
+  catch(e){ setFit('無法取用相機：'+(e.name||e.message)); } }
+function setFit(t){ $('fitStatusText').textContent=t; }
+async function flipCamera(){ if(srcMode==='upload'){ switchToCamera(); return; } currentFacing=currentFacing==='environment'?'user':'environment'; await startCam(); }
+
+/* ===== 上傳影片分析（付費 / 管理者權限） ===== */
+function pickVideo(){ if(tier==='trial'){ toast('上傳影片分析為付費 / 管理者功能，請升級'); return; } $('vidFile').click(); }
+function onVidFile(e){ const f=e.target.files&&e.target.files[0]; if(f)loadUploadVideo(f); e.target.value=''; }
+function loadUploadVideo(file){ const url=URL.createObjectURL(file); srcMode='upload';
+  try{ camVideo.pause(); }catch(_){}
+  camVideo.srcObject=null; camVideo.src=url; camVideo.loop=true; camVideo.muted=true; camVideo.playsInline=true;
+  camVideo.onloadedmetadata=()=>{ $('upSeek').max=Math.max(1,Math.floor((camVideo.duration||1)*1000)); };
+  camVideo.ontimeupdate=()=>{ if(srcMode==='upload'&&camVideo.duration){ $('upSeek').value=Math.floor(camVideo.currentTime*1000); } };
+  camVideo.play().catch(()=>{}); $('upPlay').textContent='⏸';
+  $('upbar').classList.remove('hidden'); resetStats(); setFit('分析上傳影片中');
+  ensurePose().then(ok=>{ if(ok&&!aiOn){ aiOn=true; $('tAuto').classList.add('on'); updateReadoutVis(); } }); }
+function uploadPlayPause(){ if(camVideo.paused){ camVideo.play().catch(()=>{}); $('upPlay').textContent='⏸'; } else { camVideo.pause(); $('upPlay').textContent='▶'; } }
+function uploadSeek(v){ if(camVideo.duration){ camVideo.currentTime=v/1000; } }
+function switchToCamera(){ srcMode='camera'; $('upbar').classList.add('hidden'); camVideo.loop=false; camVideo.ontimeupdate=null; camVideo.onloadedmetadata=null;
+  try{ camVideo.pause(); }catch(_){} camVideo.removeAttribute('src'); try{ camVideo.load(); }catch(_){}
+  if(localStream){ camVideo.srcObject=localStream; camVideo.play().catch(()=>{}); setFit('相機已啟動'); } else startCam(); }
+
+function registerPeer(code){ $('fitCode').textContent=code; peer=new Peer('bikefitcam'+code);
+  peer.on('open',()=>setFit('等待平板連線'));
+  peer.on('connection',conn=>{ conn.on('open',()=>{ ensureOut(); if(outStream){ peer.call(conn.peer,outStream); $('fitDot').classList.add('live'); setFit('平板已連線'); } });
+    conn.on('close',()=>{ $('fitDot').classList.remove('live'); setFit('平板已離線'); }); });
+  peer.on('error',err=>{ if(err.type==='unavailable-id') registerPeer(String(Math.floor(1000+Math.random()*9000))); }); }
+function ensureOut(){ if(!outStream){ try{ outStream=fitCanvas.captureStream(30); }catch(e){ setFit('此瀏覽器不支援畫面串流'); } } }
+
+async function ensurePose(){ if(poseLandmarker)return true; setFit('載入 AI 模型中…（首次約 5 秒）');
+  try{ const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14'); const {PoseLandmarker,FilesetResolver}=vision;
+    const fileset=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    const opts=det=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',delegate:det},runningMode:'VIDEO',numPoses:1});
+    try{ poseLandmarker=await PoseLandmarker.createFromOptions(fileset,opts('GPU')); }catch(e){ poseLandmarker=await PoseLandmarker.createFromOptions(fileset,opts('CPU')); }
+    setFit('AI 追蹤中'); return true; }catch(err){ setFit('AI 模型載入失敗（仍可串流影像）'); return false; } }
+function toggleAuto(){ aiOn=!aiOn; $('tAuto').classList.toggle('on',aiOn); updateReadoutVis();
+  if(aiOn && !poseLandmarker) ensurePose(); }
+function updateReadoutVis(){ $('readout').classList.toggle('hidden', !(aiOn && !adjustMode)); }
+
+function chooseSide(lm){ if(sideMode!=='auto')return sideMode; const sum=s=>['shoulder','hip','knee','ankle'].reduce((a,k)=>a+(lm[SIDES[s][k]]?.visibility||0),0); return sum('left')>=sum('right')?'left':'right'; }
+function angAt(a,b,c){ const v1={x:a.x-b.x,y:a.y-b.y},v2={x:c.x-b.x,y:c.y-b.y}; let d=Math.abs((Math.atan2(v2.y,v2.x)-Math.atan2(v1.y,v1.x))*180/Math.PI); if(d>180)d=360-d; return Math.round(d); }
+function horizonAngle(a,b){ let d=Math.abs(Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI); if(d>90)d=180-d; return Math.round(d); }
+function computeP(vw,vh){ const idx=SIDES[curSide],P={}; for(const k in idx){ let nx,ny,vv;
+    if(frozen && overrides[k]){ nx=overrides[k].x; ny=overrides[k].y; vv=1; } else { const p=lastLM[idx[k]]; nx=p.x; ny=p.y; vv=p.visibility??1; }
+    P[k]={x:(mirrored?1-nx:nx)*vw, y:ny*vh, v:vv}; } return P; }
+function anglesOf(P){ const out={}; for(const key in ANGLE_DEFS){ const d=ANGLE_DEFS[key],ps=d.pts.map(n=>P[n]); out[key]=ps.some(p=>p.v<.25)?null:angAt(ps[0],ps[1],ps[2]); } return out; }
+
+function line(ctx,a,b){ ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke(); }
+function roundRect(ctx,x,y,w,h,r){ ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath(); }
+function pill(ctx,t,cx,cy,s){ ctx.font=`700 ${18*s}px "JetBrains Mono",monospace`; const w=ctx.measureText(t).width+16*s,h=25*s,x=cx-w/2,y=cy-h;
+  roundRect(ctx,x,y,w,h,8*s);ctx.fillStyle=BLUE;ctx.fill();ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(t,cx,y+h/2);ctx.textAlign='left';ctx.textBaseline='alphabetic'; }
+function tagTxt(ctx,t,x,y,fs){ ctx.font=`700 ${fs}px "Archivo",sans-serif`; ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,.65)';ctx.strokeText(t,x,y);ctx.fillStyle='#fff';ctx.fillText(t,x,y); }
+function bannerText(){ return captureMode==='pre'?'PRE-FIT':captureMode==='post'?'POST-FIT':null; }
+function drawBanner(ctx,t,w,s){ if(!t)return; const fs=34*s,h=fs+22*s; ctx.font=`900 ${fs}px "Archivo",sans-serif`;
+  const bw=ctx.measureText(t).width+44*s,x=(w-bw)/2,y=18*s; roundRect(ctx,x,y,bw,h,12*s);ctx.fillStyle=BLUE;ctx.fill();
+  ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(t,w/2,y+h/2);ctx.textAlign='left';ctx.textBaseline='alphabetic'; }
+function drawGrid(ctx,w,h){ ctx.lineWidth=Math.max(1,w/900);ctx.strokeStyle='rgba(255,255,255,.3)';
+  for(let i=1;i<3;i++){ line(ctx,{x:w*i/3,y:0},{x:w*i/3,y:h}); line(ctx,{x:0,y:h*i/3},{x:w,y:h*i/3}); }
+  ctx.strokeStyle='rgba(47,158,255,.6)'; line(ctx,{x:w/2,y:0},{x:w/2,y:h}); }
+function renderScene(ctx,P,out,s){ ctx.lineCap='round';
+  BONES.forEach(([a,b])=>{ if(P[a].v<.25||P[b].v<.25)return; ctx.lineWidth=4*s;ctx.strokeStyle='rgba(0,0,0,.4)';line(ctx,P[a],P[b]); ctx.lineWidth=2.2*s;ctx.strokeStyle=BLUE;line(ctx,P[a],P[b]); });
+  for(const k in P){ const p=P[k]; if(p.v<.25)continue; ctx.beginPath();ctx.arc(p.x,p.y,5*s,0,7);ctx.fillStyle='#0a0c0f';ctx.fill();
+    ctx.lineWidth=2*s;ctx.strokeStyle=BLUE;ctx.stroke(); ctx.beginPath();ctx.arc(p.x,p.y,1.8*s,0,7);ctx.fillStyle='#fff';ctx.fill(); tagTxt(ctx,JN[k],p.x+10*s,p.y+4*s,11*s); }
+  for(const key in ANGLE_DEFS){ const val=out[key]; if(val==null)continue; const vx=P[ANGLE_DEFS[key].vtx]; pill(ctx,val+'°',vx.x,vx.y-12*s,s); } }
+
+function renderLoop(){ const loop=()=>{ drawComposite(); requestAnimationFrame(loop); }; loop(); }
+function drawComposite(){ if(compareOpen){ if(fitCanvas.width) drawCompareCanvas(); return; }
+  const v=camVideo; if(!v||!v.videoWidth)return; const vw=v.videoWidth,vh=v.videoHeight;
+  if(fitCanvas.width!==vw){ fitCanvas.width=vw; fitCanvas.height=vh; }
+  const base=(frozen&&freezeImg)?freezeImg:v;
+  if(mirrored){ fitCtx.save();fitCtx.translate(vw,0);fitCtx.scale(-1,1);fitCtx.drawImage(base,0,0,vw,vh);fitCtx.restore(); } else fitCtx.drawImage(base,0,0,vw,vh);
+  if(aiOn && poseLandmarker && !frozen && v.readyState>=2){ try{ const res=poseLandmarker.detectForVideo(v,performance.now());
+    if(res&&res.landmarks&&res.landmarks.length){ lastLM=res.landmarks[0]; curSide=chooseSide(lastLM); } }catch(e){} }
+  const s=vh/720; let out=null;
+  if(aiOn && lastLM){ const P=computeP(vw,vh); out=anglesOf(P); out.torso=(P.hip.v>=.25&&P.shoulder.v>=.25)?horizonAngle(P.hip,P.shoulder):null; renderScene(fitCtx,P,out,s); lastAngles=out; }
+  drawBanner(fitCtx,bannerText(),vw,s); if(gridOn) drawGrid(fitCtx,vw,vh);
+  if(out){ if(!frozen) updateStats(out); renderReadout(out); } else if(aiOn) renderReadout(null); }
+function updateStats(out){ for(const k in out){ const val=out[k]; if(val==null)continue; if(!stats[k])stats[k]={min:val,max:val};else{stats[k].min=Math.min(stats[k].min,val);stats[k].max=Math.max(stats[k].max,val);} } }
+function renderReadout(out){ $('roSide').textContent=(sideMode==='auto'?'自動 · ':'')+(curSide==='left'?'左側':'右側');
+  let h=''; ORDER.forEach(k=>{ const d=ANGLE_DEFS[k],val=out?out[k]:null,st=stats[k];
+    h+=`<div class="ro-row"><span class="nm"><b>${d.label}</b></span><span><span class="val">${val==null?'--':val+'°'}</span>${st?`<span class="ext">${st.min}-${st.max}</span>`:''}</span></div>`; });
+  $('roList').innerHTML=h; }
+function cycleSide(){ sideMode=sideMode==='auto'?'left':sideMode==='left'?'right':'auto'; resetStats(); }
+function resetStats(){ stats={}; }
+
+function toggleMirror(){ mirrored=!mirrored; $('tMirror').classList.toggle('on',mirrored); }
+function toggleGrid(){ gridOn=!gridOn; $('tGrid').classList.toggle('on',gridOn); }
+function toggleFreeze(){ if(!frozen){ const v=camVideo,vw=v.videoWidth,vh=v.videoHeight; freezeImg=document.createElement('canvas'); freezeImg.width=vw;freezeImg.height=vh;
+    freezeImg.getContext('2d').drawImage(v,0,0,vw,vh); frozen=true; }
+  else { frozen=false; freezeImg=null; overrides={}; if(adjustMode){ adjustMode=false; $('tAdjust').classList.remove('on'); fitCanvas.style.pointerEvents='none'; $('adjustHint').style.display='none'; } updateReadoutVis(); }
+  $('tFreeze').classList.toggle('on',frozen); $('freezeTag').style.display=frozen?'block':'none'; }
+
+/* 校正：拖曳關節（只在定格時可校正；開啟校正會自動定格） */
+function toggleAdjust(){ adjustMode=!adjustMode; $('tAdjust').classList.toggle('on',adjustMode);
+  fitCanvas.style.pointerEvents=adjustMode?'auto':'none'; $('adjustHint').style.display=adjustMode?'inline-flex':'none'; updateReadoutVis();
+  if(adjustMode && !frozen) toggleFreeze(); }
+function resetOverrides(){ overrides={}; toast('已重設為自動偵測'); }
+let dragKey=null;
+function ptToCanvas(cx,cy){ const r=fitCanvas.getBoundingClientRect(),cw=fitCanvas.width,ch=fitCanvas.height,sc=Math.min(r.width/cw,r.height/ch);
+  const dw=cw*sc,dh=ch*sc,ox=r.left+(r.width-dw)/2,oy=r.top+(r.height-dh)/2; const px=(cx-ox)/sc,py=(cy-oy)/sc;
+  let nx=px/cw; if(mirrored)nx=1-nx; return {px,py,nx,ny:py/ch}; }
+function bindAdjust(){
+  fitCanvas.addEventListener('pointerdown',e=>{ if(!adjustMode||!lastLM)return; const {px,py}=ptToCanvas(e.clientX,e.clientY);
+    const P=computeP(fitCanvas.width,fitCanvas.height); let best=null,bd=1e9; for(const k in P){ const d=Math.hypot(P[k].x-px,P[k].y-py); if(d<bd){bd=d;best=k;} }
+    if(bd<Math.max(34,fitCanvas.width*0.045)){ dragKey=best; setOverride(e); fitCanvas.setPointerCapture(e.pointerId); e.preventDefault(); } });
+  fitCanvas.addEventListener('pointermove',e=>{ if(dragKey)setOverride(e); });
+  fitCanvas.addEventListener('pointerup',()=>dragKey=null);
+}
+function setOverride(e){ const {nx,ny}=ptToCanvas(e.clientX,e.clientY); overrides[dragKey]={x:nx,y:ny}; }
+
+/* PRE / POST 擷取 */
+const store={ pre:{photo:null,video:null,ext:'webm',angles:null,jpeg:null,clean:null}, post:{photo:null,video:null,ext:'webm',angles:null,jpeg:null,clean:null} };
+function setMode(m){ captureMode=(captureMode===m?null:m); $('preBtn').classList.toggle('on',captureMode==='pre'); $('postBtn').classList.toggle('on',captureMode==='post'); }
+function download(url,name){ const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); }
+function toast(t){ const el=$('toast'); el.textContent=t; el.classList.add('show'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),1800); }
+function flashShutter(){ const s=$('shutter'); s.classList.remove('flash'); void s.offsetWidth; s.classList.add('flash'); }
+function capturePhoto(){ if(!captureMode){ toast('請先選 PRE 或 POST 模式'); return; } if(!fitCanvas.width){ toast('尚未有影像'); return; }
+  store[captureMode].jpeg=fitCanvas.toDataURL('image/jpeg',0.85);
+  fitCanvas.toBlob(blob=>{ const url=URL.createObjectURL(blob); store[captureMode].photo=url; store[captureMode].angles=lastAngles?{...lastAngles}:store[captureMode].angles; flashShutter(); download(url,'分享用-'+(captureMode==='pre'?'PRE':'POST')+'-'+Date.now()+'.png'); toast(bannerText()+' 照片已存（分享用）'); },'image/png'); }
+let recorder=null,recChunks=[],recording=false;
+function pickMime(){ const c=['video/mp4;codecs=h264','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']; for(const m of c){ try{ if(MediaRecorder.isTypeSupported(m))return m; }catch(e){} } return ''; }
+function toggleRecord(){ if(!captureMode){ toast('請先選 PRE 或 POST 模式'); return; } recording?stopRecord():startRecord(); }
+function startRecord(){ let stream; try{ stream=fitCanvas.captureStream(30); }catch(e){ toast('此瀏覽器不支援錄影'); return; }
+  const mime=pickMime(); try{ recorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined); }catch(e){ toast('此瀏覽器不支援錄影'); return; }
+  recChunks=[]; recorder.ondataavailable=e=>{ if(e.data&&e.data.size)recChunks.push(e.data); };
+  recorder.onstop=()=>{ const type=recorder.mimeType||mime||'video/webm'; const blob=new Blob(recChunks,{type}),url=URL.createObjectURL(blob),ext=type.includes('mp4')?'mp4':'webm';
+    store[captureMode].video=url; store[captureMode].ext=ext; download(url,'分享用-'+(captureMode==='pre'?'PRE':'POST')+'-'+Date.now()+'.'+ext); toast(bannerText()+' 影片已存（分享用）'); };
+  recording=true; recorder.start(); $('recBtn').classList.add('on'); $('recBtn').querySelector('.lbl').textContent='停止'; $('recDot').style.display='inline-block'; }
+function stopRecord(){ recording=false; if(captureMode&&lastAngles&&!store[captureMode].angles) store[captureMode].angles={...lastAngles}; try{ recorder&&recorder.state!=='inactive'&&recorder.stop(); }catch(e){} $('recBtn').classList.remove('on'); $('recBtn').querySelector('.lbl').textContent='錄影'; $('recDot').style.display='none'; }
+
+/* 對照 */
+let cmpMode='photo';
+function openCompare(){ if(recording)stopRecord(); compareOpen=true; loadCmpImg(); $('compare').classList.remove('hidden'); cmpTab(cmpMode); }
+function closeCompare(){ compareOpen=false; $('compare').querySelectorAll('video').forEach(v=>v.pause()); $('compare').classList.add('hidden'); }
+function cmpTab(m){ cmpMode=m; $('cmpPhotoTab').classList.toggle('on',m==='photo'); $('cmpVideoTab').classList.toggle('on',m==='video'); $('cmpSync').style.display=m==='video'?'inline-flex':'none'; renderDiff(); fillSlot('cmpPre','pre'); fillSlot('cmpPost','post'); if(m==='photo')loadCmpImg(); }
+function loadCmpImg(){ ['pre','post'].forEach(k=>{ const u=store[k].photo; if(u){ const im=new Image(); im.src=u; cmpImg[k]=im; } else cmpImg[k]=null; }); }
+function renderDiff(){ const a=store.pre.angles||{}, b=store.post.angles||{}, fmt=v=>(v==null)?'--':v+'°'; let h='';
+  ORDER.forEach(k=>{ const pv=a[k],qv=b[k]; let delta='';
+    if(pv!=null&&qv!=null){ const d=qv-pv,cls=d>0?'up':d<0?'down':'zero'; delta=`<span class="dc-delta ${cls}">${d>0?'+':''}${d}°</span>`; }
+    h+=`<div class="diff-chip"><span class="dc-name">${ZH[k]}</span><span class="dc-vals">${fmt(pv)}<i>→</i>${fmt(qv)}</span>${delta}</div>`; });
+  $('cmpDiff').innerHTML=h; }
+function fillSlot(id,key){ const el=$(id),data=store[key][cmpMode],lbl=key==='pre'?'PRE-FIT':'POST-FIT';
+  if(!data){ el.innerHTML='<div class="cmp-empty">尚未擷取</div>'; return; }
+  el.innerHTML=cmpMode==='photo'?`<img src="${data}"><a class="cmp-dl" href="${data}" download="${lbl}.png">下載</a>`:`<video src="${data}" autoplay muted loop playsinline controls></video><a class="cmp-dl" href="${data}" download="${lbl}.${store[key].ext}">下載</a>`; }
+function syncPlay(){ $('compare').querySelectorAll('video').forEach(v=>{ try{ v.currentTime=0; v.play(); }catch(e){} }); }
+
+/* ===== Fitting 報告頁（建議範圍 + 三階閘門） ===== */
+let tier='full', dlCount=0, reportAngles=null, reportShot=null, reportImgEl=null;
+const REPORT_DEFS=[
+  {label:'座高（膝伸展）',src:'kneeExt',low:140,high:148,axisMin:120,axisMax:165,
+    advice:(s)=> s==='over'?'膝角偏大 → 座墊可能太高，建議降低座墊': s==='under'?'膝角偏小 → 座墊可能太低，建議調高座墊':'膝伸展落在建議範圍，座高適中'},
+  {label:'膝屈曲（上死點）',src:'kneeMin',low:65,high:75,axisMin:50,axisMax:95,
+    advice:(s)=> s==='over'?'上死點彎曲不足 → 確認量測點是否正確': s==='under'?'上死點膝過彎 → 座高可能偏低或踏板位置偏移':'上死點屈曲適中，搭配座高一起判讀'},
+  {label:'腳跟/腳掌（踝）',src:'ankle',low:90,high:110,axisMin:70,axisMax:130,
+    advice:(s)=> s==='over'?'踝角偏大 → 配合座高一起看，可能需降低座墊': s==='under'?'踝角偏小 → 腳跟下垂，座高可能偏低，建議調高':'踝角適中'},
+  {label:'背部（軀幹對水平）',src:'torso',low:40,high:50,axisMin:25,axisMax:70,
+    advice:(s)=> s==='over'?'上身偏挺 → 把手可降低或拉長': s==='under'?'上身過趴 → 留意柔軟度與舒適度':'背角適中'},
+  {label:'肩膀脖子',src:'back',low:80,high:95,axisMin:60,axisMax:120,
+    advice:(s)=> s==='over'?'肩開過大 → 把手太遠或太低': s==='under'?'肩開過小 → 把手太近':'肩頸角度適中'},
+  {label:'手肘',src:'arm',low:150,high:165,axisMin:130,axisMax:180,
+    advice:(s)=> s==='over'?'手肘偏直 → 把手可能太遠': s==='under'?'手肘過彎 → 把手可能太近':'手肘微彎，適中'},
+  {label:'髖開 Hip',src:'hip',low:90,high:110,axisMin:70,axisMax:130,
+    advice:(s)=> s==='over'?'髖開過大 → 坐墊偏前或把手偏高': s==='under'?'髖開過小 → 坐姿偏趴':'髖開角度適中'},
+];
+function setTier(t){ tier=t; document.querySelectorAll('#repTier button').forEach(b=>b.classList.toggle('on',b.dataset.t===t)); renderReport(); }
+const DISCIPLINE_TIPS=[
+  {t:'🏔️ 爬坡賽事',d:'坐姿可略前移、髖角開一些以利出力，長爬坡多用較高迴轉、上半身放鬆。座墊前後或高度若要明顯更動，建議先諮詢專業 bike fitter，避免影響膝蓋負荷。'},
+  {t:'🛣️ 長距離 / 耐力賽',d:'以「能長時間維持」為優先：把手可略高、背角略開，降低頸肩與會陰壓力；坐墊舒適度與三點支撐比極致空力更重要。寧可稍微保守，避免後段痠痛。'},
+  {t:'🏠 室內訓練台設定',d:'訓練台會把後輪架高，記得用前輪墊塊把車身墊平，否則前傾角度會失真；室內散熱差，務必加風扇；久坐壓力較大，可微調坐墊角度。台上量到的數據與實際道路會有些許差異。'},
+  {t:'💡 其他建議',d:'一次只改一個地方、每次 2–3mm 小幅調整後試騎；量測前先暖身幾分鐘讓姿勢穩定；側拍時鏡頭對準曲柄/髖高度、與車身正側面垂直最準。若出現疼痛、麻木或持續不適，請尋求專業 bike fitter 協助。'},
+];
+function openReport(){ reportAngles=lastAngles?{...lastAngles}:{}; reportAngles._kneeExt=(stats.knee?stats.knee.max:reportAngles.knee); reportAngles._kneeMin=(stats.knee?stats.knee.min:reportAngles.knee);
+  reportShot=fitCanvas.width?fitCanvas.toDataURL('image/jpeg',0.85):null; if(reportShot){ reportImgEl=new Image(); reportImgEl.src=reportShot; }
+  $('report').classList.remove('hidden'); renderReport(); }
+function closeReport(){ $('report').classList.add('hidden'); }
+function valFor(def){ const a=reportAngles||{}; if(def.src==='kneeExt')return a._kneeExt; if(def.src==='kneeMin')return a._kneeMin; return a[def.src]; }
+function statusOf(def,v){ if(v==null)return 'na'; if(v<def.low)return 'under'; if(v>def.high)return 'over'; return 'ok'; }
+function renderReport(){ const locked=tier==='trial'; let h='';
+  REPORT_DEFS.forEach(def=>{ const v=valFor(def),st=statusOf(def,v);
+    const pct=v==null?0:Math.max(0,Math.min(100,(v-def.axisMin)/(def.axisMax-def.axisMin)*100));
+    const zl=(def.low-def.axisMin)/(def.axisMax-def.axisMin)*100, zw=(def.high-def.low)/(def.axisMax-def.axisMin)*100;
+    const adv=v==null?'尚未偵測到此關節':def.advice(st);
+    h+=`<div class="rep-row"><div class="rep-top"><span class="rep-name">${def.label}</span><span class="rep-val ${st}">${v==null?'--':v+'°'}</span></div>
+      <div class="rep-bar"><div class="rep-zone" style="left:${zl}%;width:${zw}%"></div>${v==null?'':`<div class="rep-mark" style="left:${pct}%"></div>`}</div>
+      <div class="rep-range">建議範圍 ${def.low}–${def.high}°</div>
+      <div class="rep-advice ${locked?'locked':''}">${adv}</div>${locked?'<div class="rep-lock">🔒 升級解鎖完整調整建議</div>':''}</div>`; });
+  const dh = locked ? '<div class="rep-row"><div class="rep-lock">🔒 升級解鎖賽事 / 情境調整建議</div></div>'
+    : DISCIPLINE_TIPS.map(x=>`<details class="rep-acc"><summary>${x.t}</summary><p>${x.d}</p></details>`).join('');
+  $('repBody').innerHTML='<div class="rep-sec">關節量測</div>'+h+'<div class="rep-sec">賽事 / 情境建議</div>'+dh;
+  const dl=$('repDl');
+  if(tier==='trial'){ dl.textContent='🔒 付費後可下載報告'; dl.disabled=true; dl.style.opacity=.55; }
+  else if(tier==='paid'){ const left=Math.max(0,3-dlCount); dl.textContent='⬇ 下載報告（本月剩 '+left+' 次）'; dl.disabled=left<=0; dl.style.opacity=left<=0?.55:1; }
+  else { dl.textContent='⬇ 下載報告'; dl.disabled=false; dl.style.opacity=1; } }
+function downloadReport(){ if(tier==='trial'){ toast('試用版無法下載，請升級'); return; }
+  if(tier==='paid'&&dlCount>=3){ toast('本月下載次數已用完'); return; }
+  const url=buildReportImage(); if(!url){ toast('產生報告失敗'); return; }
+  download(url,'BikeFit報告-'+Date.now()+'.png'); if(tier==='paid'){ dlCount++; renderReport(); } toast('報告已下載'); }
+function buildReportImage(){ try{
+  const W=820,pad=28,rowH=96; let heroH=0; const hero=(reportImgEl&&reportImgEl.complete&&reportImgEl.naturalWidth)?reportImgEl:null;
+  if(hero){ const bw=W-pad*2,sc=Math.min(bw/hero.naturalWidth,360/hero.naturalHeight); heroH=hero.naturalHeight*sc+20; }
+  const H=120+heroH+REPORT_DEFS.length*rowH+50;
+  const c=document.createElement('canvas'); c.width=W; c.height=H; const x=c.getContext('2d');
+  x.fillStyle='#0a0c0f'; x.fillRect(0,0,W,H);
+  x.fillStyle='#fff'; x.font='900 30px Archivo,sans-serif'; x.textBaseline='alphabetic'; x.fillText('BikeFit Fitting 報告',pad,54);
+  x.fillStyle='#7d8a96'; x.font='600 14px Archivo,sans-serif'; x.fillText(new Date().toLocaleString(),pad,80);
+  let y=104;
+  if(hero){ const bw=W-pad*2,sc=Math.min(bw/hero.naturalWidth,360/hero.naturalHeight),dw=hero.naturalWidth*sc,dh=hero.naturalHeight*sc; x.drawImage(hero,(W-dw)/2,y,dw,dh); y+=dh+20; }
+  REPORT_DEFS.forEach(def=>{ const v=valFor(def),st=statusOf(def,v);
+    x.fillStyle='#13171c'; roundRect(x,pad,y,W-pad*2,rowH-14,12); x.fill();
+    x.fillStyle='#fff'; x.font='800 18px Archivo,sans-serif'; x.textAlign='left'; x.fillText(def.label,pad+16,y+30);
+    x.fillStyle=st==='ok'?'#5fe0a0':st==='over'?'#ffb454':st==='under'?'#ff8a8a':'#7d8a96'; x.font='700 23px "JetBrains Mono",monospace'; x.textAlign='right'; x.fillText(v==null?'--':v+'°',W-pad-16,y+30); x.textAlign='left';
+    const bx=pad+16,by=y+44,bw=W-pad*2-32,bh=8;
+    x.fillStyle='#222a32'; roundRect(x,bx,by,bw,bh,4); x.fill();
+    const zl=(def.low-def.axisMin)/(def.axisMax-def.axisMin),zw=(def.high-def.low)/(def.axisMax-def.axisMin);
+    x.fillStyle='rgba(95,224,160,.55)'; roundRect(x,bx+bw*zl,by,bw*zw,bh,4); x.fill();
+    if(v!=null){ const pp=Math.max(0,Math.min(1,(v-def.axisMin)/(def.axisMax-def.axisMin))); x.fillStyle='#fff'; x.fillRect(bx+bw*pp-2,by-4,4,bh+8); }
+    if(tier!=='trial'){ x.fillStyle='#cfd6dc'; x.font='500 14px Archivo,sans-serif'; x.fillText(v==null?'尚未偵測':def.advice(st),pad+16,y+rowH-20); }
+    y+=rowH; });
+  x.fillStyle='#7d8a96'; x.font='500 12px Archivo,sans-serif'; x.fillText('參考值為一般建議，實際以專業 fitting 判斷為準。',pad,y+22);
+  return c.toDataURL('image/png');
+}catch(e){ return null; } }
+
+/* 對照畫面畫進 fitCanvas → 同步投到平板（上下並排） */
+function labelPill(ctx,text,x,y,s){ ctx.font=`700 ${20*s}px "Archivo",sans-serif`; const w=ctx.measureText(text).width+18*s,h=30*s;
+  roundRect(ctx,x,y,w,h,9*s); ctx.fillStyle=BLUE; ctx.fill(); ctx.fillStyle='#fff'; ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillText(text,x+9*s,y+h/2); ctx.textBaseline='alphabetic'; }
+function drawCompareHalf(ctx,key,y,h,W,s){
+  const isPhoto=cmpMode==='photo'; const src=isPhoto?cmpImg[key]:$('compare').querySelector('#cmp'+(key==='pre'?'Pre':'Post')+' video');
+  const sw=isPhoto?(src&&src.naturalWidth):(src&&src.videoWidth), sh=isPhoto?(src&&src.naturalHeight):(src&&src.videoHeight);
+  if(src&&sw){ const sc=Math.min(W/sw,h/sh),dw=sw*sc,dh=sh*sc,ox=(W-dw)/2,oy=y+(h-dh)/2; try{ ctx.drawImage(src,ox,oy,dw,dh); }catch(e){} }
+  else { ctx.fillStyle='#555'; ctx.font=`600 ${26*s}px "Archivo",sans-serif`; ctx.textAlign='center'; ctx.fillText('尚未擷取',W/2,y+h/2); ctx.textAlign='left'; }
+  labelPill(ctx, key==='pre'?'PRE-FIT':'POST-FIT', 24*s, y+18*s, s); }
+function drawCompareCanvas(){ const c=fitCanvas,ctx=fitCtx,W=c.width,H=c.height,s=H/720,mid=Math.round(H/2);
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+  drawCompareHalf(ctx,'pre',0,mid,W,s); drawCompareHalf(ctx,'post',mid,H-mid,W,s);
+  ctx.strokeStyle='rgba(47,158,255,.6)'; ctx.lineWidth=2*s; ctx.beginPath(); ctx.moveTo(0,mid); ctx.lineTo(W,mid); ctx.stroke(); }
+
+/* ===== 上傳 OFS：錄「乾淨無標註」影片（原始鏡頭） ===== */
+function toggleOfsRecord(){ if(srcMode==='upload'){ toast('上傳影片模式：你已有原始檔，可直接給 OFS'); return; } if(!captureMode){ toast('請先選 PRE 或 POST'); return; } ofsRecording?stopOfsRecord():startOfsRecord(); }
+function startOfsRecord(){ if(!localStream){ toast('相機尚未啟動'); return; }
+  const mime=pickMime(); const tag=captureMode==='pre'?'PRE':'POST'; const mode=captureMode;
+  try{ ofsRec=new MediaRecorder(localStream,mime?{mimeType:mime}:undefined); }catch(e){ toast('此瀏覽器不支援錄影'); return; }
+  let annStream=null; try{ annStream=fitCanvas.captureStream(30); }catch(e){}
+  try{ ofsAnnRec=annStream?new MediaRecorder(annStream,mime?{mimeType:mime}:undefined):null; }catch(e){ ofsAnnRec=null; }
+  ofsChunks=[]; ofsAnnChunks=[];
+  ofsRec.ondataavailable=e=>{ if(e.data&&e.data.size)ofsChunks.push(e.data); };
+  ofsRec.onstop=()=>{ const type=ofsRec.mimeType||mime||'video/webm'; const blob=new Blob(ofsChunks,{type}),url=URL.createObjectURL(blob),ext=type.includes('mp4')?'mp4':'webm';
+    store[mode].clean=url; download(url,'OFS上傳用-'+tag+'-'+Date.now()+'.'+ext); toast('OFS 乾淨影片已存（'+tag+'）→ 拖進 OFS Fitting System'); };
+  if(ofsAnnRec){ ofsAnnRec.ondataavailable=e=>{ if(e.data&&e.data.size)ofsAnnChunks.push(e.data); };
+    ofsAnnRec.onstop=()=>{ const type=ofsAnnRec.mimeType||mime||'video/webm'; const blob=new Blob(ofsAnnChunks,{type}),url=URL.createObjectURL(blob),ext=type.includes('mp4')?'mp4':'webm';
+      store[mode].video=url; store[mode].ext=ext; }; }
+  ofsRecording=true; ofsRec.start(); if(ofsAnnRec)ofsAnnRec.start();
+  $('ofsRecBtn').classList.add('on'); $('ofsDot').style.display='inline-block'; $('ofsRecBtn').querySelector('.lbl').textContent='停止 OFS'; }
+function stopOfsRecord(){ ofsRecording=false; if(captureMode&&lastAngles&&!store[captureMode].angles) store[captureMode].angles={...lastAngles};
+  try{ ofsRec&&ofsRec.state!=='inactive'&&ofsRec.stop(); }catch(e){} try{ ofsAnnRec&&ofsAnnRec.state!=='inactive'&&ofsAnnRec.stop(); }catch(e){}
+  $('ofsRecBtn').classList.remove('on'); $('ofsDot').style.display='none'; $('ofsRecBtn').querySelector('.lbl').textContent='上傳 OFS'; }
+
+/* ===== 傳送到 OFS ===== */
+function buildOfsPayload(){ const a=store.pre.angles||{}, b=store.post.angles||{};
+  return { type:'OFS_FIT_PAYLOAD', version:1, app:'BikeFitCam', createdAt:new Date().toISOString(),
+    side:(curSide==='left'?'left':'right'), angleKeys:ORDER,
+    angleNames:Object.fromEntries(ORDER.map(k=>[k,{en:ANGLE_DEFS[k].label,zh:ZH[k],tri:ANGLE_DEFS[k].tri}])),
+    pre:{ angles:store.pre.angles||null, photo:store.pre.jpeg||null },
+    post:{ angles:store.post.angles||null, photo:store.post.jpeg||null },
+    diff:Object.fromEntries(ORDER.map(k=>{ const pv=a[k],qv=b[k]; return [k,(pv!=null&&qv!=null)?qv-pv:null]; })) }; }
+function sendToOFS(){ const p=buildOfsPayload();
+  if(!p.pre.photo && !p.post.photo && !p.pre.angles && !p.post.angles){ toast('尚無 PRE/POST 資料'); return; }
+  let sent=false;
+  try{ if(window.opener){ window.opener.postMessage(p,'*'); sent=true; } }catch(e){}
+  try{ if(window.parent && window.parent!==window){ window.parent.postMessage(p,'*'); sent=true; } }catch(e){}
+  try{ const ch=new BroadcastChannel('ofs-fit'); ch.postMessage(p); ch.close(); }catch(e){}
+  const blob=new Blob([JSON.stringify(p)],{type:'application/json'}); download(URL.createObjectURL(blob),'ofs-fit-'+Date.now()+'.json');
+  toast(sent?'已即時傳送 OFS ＋下載封包':'已下載 OFS 封包（.json）'); }
+
+/* ===== 車主螢幕（平板） ===== */
+function goDisplay(){ show('display'); setTimeout(()=>$('dispCode').focus(),200); }
+function dispMsg(t,e){ const m=$('dispMsg'); m.textContent=t; m.classList.toggle('err',!!e); }
+function dispConnect(){ const code=$('dispCode').value.trim(); if(!/^\d{4}$/.test(code)){ dispMsg('請輸入 4 位數字',true); return; }
+  dispMsg('連線中…'); $('dispBtn').disabled=true; peer=new Peer();
+  peer.on('open',()=>{ const conn=peer.connect('bikefitcam'+code); let answered=false;
+    conn.on('open',()=>dispMsg('已連到，等待影像…')); conn.on('error',()=>{ dispMsg('連線失敗',true); $('dispBtn').disabled=false; });
+    peer.on('call',call=>{ call.answer(); call.on('stream',remote=>{ answered=true; const v=$('dispVideo'); v.srcObject=remote; v.play().catch(()=>{});
+      $('dispJoin').classList.add('hidden'); $('dispDot').classList.add('live'); $('dispStatus').textContent='顯示中'; }); });
+    setTimeout(()=>{ if(!answered){ dispMsg('找不到，請確認代碼與是否同一網路',true); $('dispBtn').disabled=false; } },5000); });
+  peer.on('error',err=>{ dispMsg(err.type==='peer-unavailable'?'找不到此代碼':'錯誤：'+err.type,true); $('dispBtn').disabled=false; }); }
+function dispFull(){ if(!document.fullscreenElement) document.documentElement.requestFullscreen?.(); else document.exitFullscreen?.(); }
+</script>
+</body>
+</html>
